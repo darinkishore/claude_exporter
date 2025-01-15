@@ -1,8 +1,7 @@
 // ==UserScript==
 // @name         export claude.ai conversation
-// @namespace    https://your-namespace
-// @version      0.6
-// @description  double-tap shift or click the new accent button next to the existing "chat-menu-trigger" to export
+// @version      0.7
+// @description  Double-tap shift OR click the new accent button next to the "chat-menu-trigger" to export conversation, including codeblocks
 // @match        https://claude.ai/*
 // @grant        GM_setClipboard
 // ==/UserScript==
@@ -23,7 +22,7 @@
     }
   });
 
-  // poll for the container that has the existing "The Carrington Solar Storm" button
+  // poll for the container that has the existing chat-menu-trigger button
   const poll = setInterval(() => {
     const parent = document.querySelector(
       'div.flex.min-w-0.items-center.max-md\\:text-sm'
@@ -42,11 +41,11 @@
   function addExportButton(parentDiv, existingBtn) {
     const newBtn = document.createElement('button');
     newBtn.type = 'button';
-    newBtn.textContent = 'export';
+    newBtn.textContent = 'Export Convo';
 
     // replicate the existing button's classes, then ensure the accent orange style
     newBtn.className = existingBtn.className
-      + 'px-30 text-oncolor-100 hover:bg-accent-main-200 hover:text-oncolor-100';
+      + ' bg-accent-main-100 text-oncolor-100 hover:bg-accent-main-200 hover:text-oncolor-100';
 
     // remove data attributes to avoid collisions
     newBtn.removeAttribute('data-testid');
@@ -63,6 +62,7 @@
   }
 
   function exportConversation() {
+    // gather user+assistant messages in order
     const blocks = [...document.querySelectorAll(
       'div[data-testid="user-message"], div.font-claude-message'
     )];
@@ -70,9 +70,9 @@
     let output = '<conversation>\n\n';
     for(const el of blocks) {
       if (el.matches('div[data-testid="user-message"]')) {
-        output += `<user>\n${grabText(el)}\n</user>\n\n`;
+        output += `<user>\n${parseMessageContent(el)}\n</user>\n\n`;
       } else {
-        output += `<assistant>\n${grabText(el)}\n</assistant>\n\n`;
+        output += `<assistant>\n${parseMessageContent(el)}\n</assistant>\n\n`;
       }
     }
     output += '</conversation>';
@@ -81,12 +81,51 @@
     alert('conversation copied!');
   }
 
-  function grabText(root) {
-    let text = '';
-    const paragraphs = root.querySelectorAll('p');
-    paragraphs.forEach(p => {
-      text += p.innerText.trim() + '\n';
-    });
-    return text.trim();
+  /**
+   * parseMessageContent:
+   * - finds all <p> and code blocks (<pre> <code>) in DOM order
+   * - code blocks get formatted as:
+   *
+   *   <code>
+   *   ```$LANG
+   *   (code content)
+   *   ```
+   *   </code>
+   *
+   * - returns a string suitable for the final export
+   */
+  function parseMessageContent(root) {
+    let parts = [];
+
+    // we want everything in order, so let's pick p's and code blocks in sequence
+    // the main container for assistant messages is often:
+    //   <div class="grid-cols-1 grid ...">
+    // but let's just search inside `root` for 'p, pre code'
+    const nodes = root.querySelectorAll('p, pre code');
+
+    for (const node of nodes) {
+      if (node.tagName.toLowerCase() === 'p') {
+        // just the text
+        parts.push(node.innerText.trim());
+      } else {
+        // it's a code block
+        const codeText = node.textContent || '';
+        let lang = '';
+
+        // parse language-xxx from class
+        const className = node.className || '';
+        const match = className.match(/language-([\w-]+)/);
+        if (match) {
+          lang = match[1]; // e.g. 'python'
+        }
+
+        // build the block
+        const codeBlock = `\n<code>\n\`\`\`${lang}\n${codeText}\n\`\`\`\n</code>\n`;
+        parts.push(codeBlock);
+      }
+    }
+
+    // join with blank lines in between for clarity
+    return parts.join('\n\n');
   }
 })();
